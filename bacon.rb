@@ -1,14 +1,8 @@
 #!/usr/bin/env ruby
 
+# Solution for http://codebrawl.com/contests/pixelizing-images-with-chunkypng
+
 require 'chunky_png'
-require 'pp'
-
-# 300 x 225
-image = ChunkyPNG::Image.from_file('output.png')
-
-puts image.metadata['Title']
-puts image.metadata['Author']
-puts "w x h = #{image.width} x #{image.height}"
 
 # Define methods to extract a sub-canvas from an existing canvas.
 module Chunks
@@ -30,7 +24,28 @@ module Chunks
     end
     chunks
   end
+end
 
+class Array
+  def extract_chunks(*args)
+    indexes = Chunks.calculate_chunked_indexes(*args)
+    return indexes.map {|i| self[i] }
+  end
+end
+
+# Add extract_chunk method to ChunkyPNG::Canvas to extract a sub-canvas.
+class ChunkyPNG::Canvas
+  def extract_chunk(x, y, w, h)
+    w = Chunks.ensure_length(width,  x, w)
+    h = Chunks.ensure_length(height, y, h)
+    new_pixels = pixels.extract_chunks(width, height, x, y, w, h)
+    self.class.new(w, h, new_pixels)
+  end
+end
+
+# Add a few more helper classes to our utility module to help with the
+# partitioning of an area into squares.
+module Chunks
   class Panel
     attr_reader :x, :y, :w, :h
     def initialize(x, y, w, h)
@@ -74,26 +89,30 @@ module Chunks
   end
 end
 
-class Array
-  def extract_chunks(*args)
-    indexes = Chunks.calculate_chunked_indexes(*args)
-    return indexes.map {|i| self[i] }
-  end
-end
+# Done with helper module code.  Time for the solution.
 
-class ChunkyPNG::Canvas
-  def extract_chunk(x, y, w, h)
-    w = Chunks.ensure_length(width,  x, w)
-    h = Chunks.ensure_length(height, y, h)
-    new_pixels = pixels.extract_chunks(width, height, x, y, w, h)
-    self.class.new(w, h, new_pixels)
-  end
+CHUNK_SIZE = 10
 
-end
+image = ChunkyPNG::Image.from_file('output.png')
+# 300 x 225
 
-chunker = Chunks::Chunker.new(image.width, image.height, 50)
-pp chunker.panels
-chunker.panels.each do |panel|
+# Creates a template of how to partition image area into CHUNK_SIZE squares.
+chunker = Chunks::Chunker.new(image.width, image.height, CHUNK_SIZE)
+
+# Gather sub-images (chunks) with their positions.
+positioned_chunks = chunker.panels.map do |panel|
   chunk = image.extract_chunk(panel.x, panel.y, panel.w, panel.h)
-  chunk.save("images/chunk-#{panel.x}-#{panel.y}.png")
+  { :chunk => chunk, :x => panel.x, :y => panel.y }
 end
+
+pixelized_image = ChunkyPNG::Canvas.new(image.width, image.height)
+
+# Recompose original image from image chunks.
+positioned_chunks.each do |pos_chunk|
+  chunk = pos_chunk[:chunk]
+  x     = pos_chunk[:x]
+  y     = pos_chunk[:y]
+  pixelized_image.replace!(chunk, x, y)
+end
+
+pixelized_image.save("pixelized_image.png")
